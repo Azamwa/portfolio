@@ -15,5 +15,3 @@
 ### FMS | 실시간 차량 관제 시스템
 
 - [WebSocket 실시간 데이터 처리 — RAF 배칭 + 쓰로틀링 최적화](./websocket-optimization.md) _(작성 예정)_
-
-### 인프라
