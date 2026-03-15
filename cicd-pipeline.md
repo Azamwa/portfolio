@@ -8,7 +8,7 @@ GitHub + GCP Cloud Build → GitLab CI/CD Self-hosted Runner 전환, Blue-Green 
 
 ## 배경
 
-사내 코드 저장소를 GitHub에서 GitLab(self-hosted)으로 이관하면서, 기존 GCP Cloud Build 기반 CI/CD도 함께 전환해야 하는 상황이었습니다. 기존 Cloud Build에서 운영하던 Blue-Green 배포 전략을 GitLab Runner 환경에 맞게 재구성하고, 배포 파이프라인 전체를 .gitlab-ci.yml 단일 파일로 통합하는 것을 목표로 했습니다.
+사내 코드 저장소를 GitHub에서 GitLab(self-hosted)으로 이관하면서, 기존 GCP Cloud Build 기반 CI/CD도 함께 전환해야 하는 상황이었다. 기존 Cloud Build에서 운영하던 Blue-Green 배포 전략을 GitLab Runner 환경에 맞게 재구성하고, 배포 파이프라인 전체를 .gitlab-ci.yml 단일 파일로 통합하는 것을 목표로 했다.
 
 | 구분        | Before                   | After                                                  |
 | ----------- | ------------------------ | ------------------------------------------------------ |
@@ -59,7 +59,7 @@ Developer → GitLab Push
 
 ### 2. Blue-Green 무중단 배포 파이프라인
 
-7단계 배포 흐름을 `.gitlab-ci.yml` 단일 파일로 구성했습니다.
+7단계 배포 흐름을 `.gitlab-ci.yml` 단일 파일로 구성했다.
 
 **핵심 로직:**
 
