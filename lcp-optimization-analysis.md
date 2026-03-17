@@ -63,17 +63,6 @@ HTML 도착 (TTFB 50ms)
 - 결과: 오히려 악화 (Performance 45점, LCP 6.3s) → 즉시 롤백
 - 원인 추정: critters의 critical CSS 추출이 Embla Carousel + Tailwind 조합에서 부정확하게 동작
 
-## 주요 서비스 동일 조건 비교 (Lighthouse 모바일)
-
-| 사이트 | Performance |
-|---|---|
-| **구스타이어** | 55 |
-| **마켓컬리** | 50점대 |
-| **무신사** | 40점대 |
-| **당근** | 15점대 |
-
-→ Lighthouse 모바일(Slow 4G + CPU 4x)에서 국내 주요 서비스 대부분 낮은 점수. **LCP의 지배 요소가 코드가 아닌 CSS/JS 총량 + 네트워크 조건**이기 때문.
-
 ## 결론
 - **코드 레벨에서 할 수 있는 LCP 최적화는 완료** — 이미지 로딩 자체는 390ms로 충분히 빠름
 - **LCP 4.4s의 병목은 render-blocking CSS(870ms)** — Next.js + Tailwind 프레임워크 구조에서 코드 레벨로 제어할 수 없는 영역
