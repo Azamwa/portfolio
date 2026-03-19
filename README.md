@@ -4,6 +4,11 @@
 
 ## 반프 — 타이어 IoT 센서 기반 실시간 차량 관제 시스템(FMS) 개발사
 
+### FMS | 실시간 차량 관제 시스템
+
+- [실시간 WebSocket 렌더링 최적화 — RAF 배칭 + Map 큐 + 데이터별 쓰로틀링](./raf-batching-optimization.md)
+- [WebSocket 싱글턴 아키텍처 — 단일 커넥션 공유 + 페이지별 구독 스코핑 설계](./websocket-singleton-architecture.md)
+
 ### GooseTire | 타이어 판매 및 예약 커머스 (goosetire.com)
 
 - [캐싱 전략 — 데이터 성격별 서버·클라이언트 이중 캐싱 설계](./caching-strategy.md)
@@ -11,7 +16,3 @@
 - [UX 개선 — Optimistic Update, Suspense Skeleton, 페이지 전환 깜빡임 제거](./ux-improvement.md)
 - [CI/CD 파이프라인 재구성 — GitHub + GCP Cloud Build → GitLab Self-hosted Runner + Blue-Green 배포](./cicd-pipeline.md)
 - [LCP 최적화 분석 — 병목 진단 및 코드 레벨 한계 기록](./lcp-optimization-analysis.md)
-
-### FMS | 실시간 차량 관제 시스템
-
-- [WebSocket 실시간 데이터 처리 — RAF 배칭 + 쓰로틀링 최적화](./websocket-optimization.md) _(작성 예정)_
