@@ -85,14 +85,9 @@ addEventListener(eventType: string, listener: (event: LiveMapWebSocketEvent) => 
     this.eventListeners.get(eventType)?.delete(listener);
   };
 }
-
-private notifyListeners(eventType: string, event: LiveMapWebSocketEvent): void {
-  const listeners = this.eventListeners.get(eventType);
-  if (listeners) {
-    listeners.forEach((listener) => listener(event));
-  }
-}
 ```
+
+이벤트가 도착하면 해당 타입의 리스너 Set을 순회하며 전체에 브로드캐스트한다.
 
 소켓 이벤트 핸들러는 이벤트 타입당 1개만 등록하고, 내부에서 리스너 풀에 분배한다.
 
@@ -126,52 +121,21 @@ useEffect(() => {
 
 ### Socket.io 내장 재연결
 
-```ts
-this.socket = io(socketUrl, {
-  transports: ["websocket", "polling"], // WebSocket 우선, 실패 시 polling 폴백
-  reconnection: true,
-  reconnectionDelay: 1000, // 1초부터 시작
-  reconnectionDelayMax: 5000, // 최대 5초 (지수 백오프)
-  reconnectionAttempts: 5, // 최대 5회
-  upgrade: true, // polling → websocket 자동 업그레이드
-  rememberUpgrade: true, // 업그레이드 성공 기억, 다음 연결부터 바로 websocket
-});
-```
+Socket.io의 옵션으로 재연결 전략과 transport 폴백을 설정했다.
 
-| 전략            | 동작                                                           |
-| --------------- | -------------------------------------------------------------- |
-| 지수 백오프     | 1초 → 2초 → 4초 → 5초(max) 간격으로 재시도                     |
-| Transport 폴백  | 기업 프록시/방화벽에서 WebSocket 차단 시 polling으로 통신 유지 |
-| 자동 업그레이드 | polling 중 WebSocket 가능해지면 자동 전환                      |
-| 업그레이드 기억 | 다음 연결부터 polling 없이 바로 WebSocket 시도                 |
+| 전략            | 설정                    | 동작                                                           |
+| --------------- | ----------------------- | -------------------------------------------------------------- |
+| Transport 우선순위 | `["websocket", "polling"]` | WebSocket 우선, 실패 시 polling 폴백                        |
+| 지수 백오프     | 1초 ~ 최대 5초          | 1초 → 2초 → 4초 → 5초(max) 간격으로 재시도                     |
+| 최대 재시도     | 5회                     | 5회 실패 시 연결 포기                                          |
+| Transport 폴백  | `upgrade: true`         | 기업 프록시/방화벽에서 WebSocket 차단 시 polling으로 통신 유지 |
+| 업그레이드 기억 | `rememberUpgrade: true` | 다음 연결부터 polling 없이 바로 WebSocket 시도                 |
 
 ### 연결 상태 리스너
 
-페이지 컴포넌트가 연결 상태를 구독해서 UI에 반영할 수 있다.
+연결 상태도 이벤트 리스너와 동일한 옵저버 패턴(`Set<listener>` + unsubscribe 반환)으로 구독한다.
 
-```ts
-private connectionListeners: Set<(connected: boolean) => void> = new Set();
-
-addConnectionListener(listener: (connected: boolean) => void): () => void {
-  this.connectionListeners.add(listener);
-  return () => this.connectionListeners.delete(listener);
-}
-```
-
-재연결 중에는 disconnect 알림을 보내지 않고, 최종 실패 시에만 `false`를 전달한다.
-
-```ts
-this.socket.on("disconnect", () => {
-  // 재연결 시도 중이면 알림 보류 — UI가 불필요하게 깜빡이는 것 방지
-  if (
-    this.reconnectAttempts > 0 &&
-    this.reconnectAttempts < this.maxReconnectAttempts
-  ) {
-    return;
-  }
-  this.notifyConnectionListeners(false);
-});
-```
+재연결 중에는 disconnect 알림을 보류하고, 최종 실패 시에만 `false`를 전달해서 UI가 불필요하게 깜빡이는 것을 방지한다.
 
 **알고 있는 한계:** 현재 Socket.io 내장 재연결(`reconnectionAttempts: 5`)과 `connect_error` 이벤트에서의 수동 카운팅이 동시에 동작한다. Socket.io가 아직 재연결을 시도 중인데 수동 카운터가 먼저 상한에 도달해 Promise를 reject할 수 있는 충돌 가능성이 있으며, 내장 재연결에 위임하고 수동 카운팅을 제거하는 방향으로 개선이 필요하다.
 
