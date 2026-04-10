@@ -18,14 +18,19 @@
 | 유형 | 기준 | 전략 |
 |------|------|------|
 | 공개 정적 데이터 | 로그인 불필요, 갱신 주기 예측 가능 | ISR + On-Demand Revalidation |
-| 매 요청 최신 데이터 | 로그인 불필요, 매 요청마다 최신 데이터 필요 | `force-dynamic` |
-| 인증 동적 데이터 | 사용자별 개인 데이터 | `force-dynamic` + `cache: 'no-store'` |
+| 매 요청 최신 데이터 | 로그인 불필요, 매 요청마다 최신 데이터 필요 | 페이지 `force-dynamic` + fetch `cache: 'no-store'` |
+| 인증 동적 데이터 | 사용자별 개인 데이터 | `force-dynamic` + fetch `cache: 'no-store'` |
+
+> **Full Route Cache와 Data Cache는 독립 레이어다.**
+> `force-dynamic`은 Full Route Cache(페이지 HTML 캐시)만 비활성화한다. 서버 컴포넌트 내부의 `fetch` 결과 캐시(Data Cache)는 별개 레이어로 `force-dynamic`과 무관하게 동작한다. 매 요청 최신 데이터를 보장하려면 fetch 옵션에 `cache: 'no-store'`를 함께 명시해야 한다. 이 구분을 놓치면 "페이지는 매번 새로 렌더링되는데 데이터는 옛날 것이 나오는" 현상이 발생한다.
 
 ---
 
-## 서버 캐싱: ISR revalidate를 데이터 비즈니스 주기에 맞춤
+## 서버 캐싱: fetch revalidate를 데이터 비즈니스 주기에 맞춤
 
 "길게 or 짧게" 이분법이 아니라, **데이터가 실제로 바뀌는 비즈니스 주기**를 기준으로 설정했다.
+
+> 아래 표의 revalidate 값은 **fetch 단위 Data Cache 설정**이다. 매장 페이지처럼 `force-dynamic`이 걸린 페이지에서도 Data Cache는 독립적으로 동작하므로, 페이지가 매 요청 렌더링되더라도 내부 fetch는 이 revalidate 값에 따라 캐시된다.
 
 | 페이지 | revalidate | 근거 |
 |--------|-----------|------|
@@ -48,10 +53,12 @@
 const fetchServerAPI = (url, { revalidate, tags }) =>
   fetch(url, { next: { revalidate, tags } })
 
-// 클라이언트 호출용 — 항상 최신
+// 캐시 비활성화 — 항상 최신 (Server Action, 인증 API 등)
 const fetchClientAPI = (url, options) =>
   fetch(url, { cache: 'no-store', ...options })
 ```
+
+`fetchClientAPI`는 명칭과 달리 브라우저 전용이 아니다. Server Action(`'use server'`)에서도 호출되며, 역할은 **"Data Cache를 사용하지 않고 매번 최신 데이터를 가져오는 것"**이다. 인증 토큰이 포함된 요청, 결제 상태 조회 등 캐싱해선 안 되는 데이터에 사용한다.
 
 새로운 API를 추가할 때 래퍼 선택만으로 캐싱 의도가 결정되고, 실수로 인증 데이터를 캐시하거나 공개 데이터를 no-store로 처리하는 실수를 타입 수준에서 차단한다.
 
@@ -60,7 +67,7 @@ const fetchClientAPI = (url, options) =>
 ## On-Demand Revalidation: 시간 기반 캐싱의 한계 보완
 
 ISR만으로는 "관리자가 데이터를 수정했는데 최대 1시간을 기다려야 반영된다"는 한계가 있다.
-이를 보완하기 위해 **admin에서 데이터 변경 시 즉시 캐시를 무효화**할 수 있는 On-Demand Revalidation API를 설계했다.
+이를 보완하기 위해 **admin에서 데이터 변경 시 즉시 캐시를 무효화**할 수 있는 On-Demand Revalidation 구조를 설계했다.
 
 ### API 설계
 
@@ -70,37 +77,48 @@ Next.js `revalidateTag`를 활용한 태그 기반 캐시 무효화 API Route (`
 - **허용 태그 화이트리스트**로 임의 캐시 무효화 차단
 - `fetchServerAPI` 유틸에 `tags` 옵션을 추가하여, 서버 컴포넌트 fetch에 태그를 **선언적으로** 부여할 수 있는 구조
 
-### 태그 설계: 계층적 구조
+프론트 측에서는 무효화 API Route와 fetch 래퍼의 tags 전달 로직을 구현해 두었고, 백엔드 admin에서 데이터 변경 시 이 엔드포인트를 호출하는 방식으로 연동한다.
+
+### revalidateTag vs revalidatePath — 태그 기반을 선택한 이유
+
+Next.js의 On-Demand Revalidation은 두 가지 방식을 제공한다.
+
+| 함수 | 무효화 대상 | 단위 |
+|-----|----------|------|
+| `revalidatePath('/agency')` | 특정 경로의 Full Route Cache + Data Cache | 경로(URL) |
+| `revalidateTag('agency')` | 해당 태그가 부여된 모든 Data Cache 엔트리 | 태그 |
+
+이 프로젝트에서는 **`revalidateTag`(태그 기반)만 사용**한다. 이유는 두 가지다.
+
+**1) 같은 데이터가 여러 페이지에 걸쳐 사용된다.**
+예를 들어 매장 데이터는 `/agency`(목록), `/agency/[agencyId]`(상세), `/reservation/[agencyId]`(예약) 세 경로에서 공유된다. `revalidatePath`로 처리하면 세 경로를 각각 호출해야 하지만, `revalidateTag('agency')` 한 번이면 세 페이지의 관련 캐시가 전부 무효화된다.
+
+**2) 백엔드-프론트 결합도가 낮다.**
+`revalidatePath`는 백엔드가 프론트의 URL 구조(`/agency/[agencyId]`)를 알아야 한다. 태그 기반이면 백엔드는 `"agency"`라는 도메인 태그만 알면 되고, 프론트가 URL을 리팩토링해도 백엔드 코드에 영향이 없다.
+
+### 태그 설계
 
 ```
-dashboard (상위)
+dashboard (상위 태그 — 하위 3개를 포괄)
 ├── dashboard-banners
 ├── dashboard-popups
 └── dashboard-promotions
 
-event (상위)
-├── event-list
-└── event-detail-{id}
-
-product (상위)
-├── product-detail-{id}
-└── product-images-{id}
-
-agency (상위)
-├── agency-list
-└── agency-detail-{id}
+event     (단일 태그)
+product   (단일 태그)
+agency    (단일 태그)
 ```
 
-- **상위 태그로 전체 무효화**: 관리자가 대시보드 전체를 갱신하고 싶을 때 `dashboard` 하나만 호출
-- **하위 태그로 개별 무효화**: 특정 상품 하나만 수정했을 때 `product-detail-{id}`만 호출
-- admin 측에서 호출 범위를 선택할 수 있어 **불필요한 캐시 버스팅을 최소화**
+**dashboard 계열만 상위/하위로 세분화**한 이유: 메인 페이지의 배너·팝업·프로모션은 각각 독립적으로 운영되며, 관리자가 배너만 수정하는 경우가 대부분이다. 상위 태그 `dashboard`로 전체를 한 번에 무효화할 수도 있고, `dashboard-banners`로 배너 캐시만 핀포인트로 무효화할 수도 있다. admin 측에서 호출 범위를 선택할 수 있어 **불필요한 캐시 버스팅을 최소화**한다.
+
+**나머지(event, product, agency)를 단일 태그로 유지**한 이유: 데이터 변경 빈도가 낮고(상품 2,000개 미만, 매장·이벤트도 소규모), 전체 일괄 무효화의 비용이 크지 않다. 태그를 ID 단위(`product-{id}`)까지 세분화하면 관리 복잡도만 증가하고 실질적 이득이 없다고 판단했다. 일괄 무효화 시에도 **실제로 백엔드를 다시 호출하는 건 유저가 접속한 페이지뿐**이므로, 미접속 페이지의 캐시가 비어있더라도 백엔드 부하로 이어지지 않는다.
 
 ### 이중 캐싱 전략의 핵심
 
 | | 시간 기반 (ISR) | 이벤트 기반 (On-Demand) |
 |---|---|---|
 | 역할 | 안전망 — 최악의 경우에도 일정 주기 내 갱신 보장 | 즉시성 — 데이터 변경 시점에 캐시 무효화 |
-| 트리거 | revalidate 시간 경과 | admin API 호출 |
+| 트리거 | revalidate 시간 경과 | admin API에서 `/api/revalidate` 웹훅 호출 |
 | 실패 시 | 이전 캐시 유지 (stale-while-revalidate) | ISR이 백업으로 동작 |
 
 두 전략이 서로의 약점을 보완한다. On-Demand가 정상 동작하면 사용자는 항상 최신 데이터를 보고, 실패하더라도 ISR 주기 내에 갱신된다.
@@ -155,7 +173,38 @@ useSearchProductPage: { placeholderData: keepPreviousData }
 
 ---
 
-## 트러블슈팅: Next.js 미들웨어 쿠키 오염 문제
+## 트러블슈팅 1: force-dynamic 페이지에서 데이터가 갱신되지 않는 문제
+
+### 증상
+
+매장 목록 페이지(`/agency`)에 `force-dynamic`을 설정했는데, 백엔드에서 API 응답을 변경한 후에도 배포 서버에서 옛날 데이터가 그대로 표시되었다. 로컬 개발 환경에서는 최신 데이터가 정상 출력.
+
+### 원인
+
+`force-dynamic`이 **모든 캐시를 끄는 것**이라고 오해하고 있었다.
+
+Next.js는 서버 측 캐시가 두 개의 독립 레이어로 나뉜다.
+
+| 레이어 | 대상 | `force-dynamic` 영향 |
+|-------|------|---------------------|
+| Full Route Cache | 페이지 HTML/RSC 페이로드 | 비활성화됨 |
+| Data Cache | 개별 `fetch()` 응답 | **영향 없음 — 독립 동작** |
+
+매장 목록 페이지는 지도 기반 UI로 클라이언트 위치에 따라 시작점이 달라 페이지 캐싱이 무의미해서 `force-dynamic`을 적용했다. 그런데 서버 컴포넌트 내부의 `getAgencyList()`는 `next: { revalidate: 604800, tags: ['agency'] }` 옵션이 걸려 있어 Data Cache에 7일간 고정되어 있었다.
+
+**페이지는 매 요청 새로 렌더링되지만, 렌더링 중에 호출되는 fetch가 캐시된 옛날 응답을 반환**하는 구조였다.
+
+로컬에서 문제가 없었던 이유는 `next dev`(개발 모드)에서는 Data Cache가 기본 비활성화되어 매번 실제 API를 호출하기 때문이다.
+
+### 해결
+
+On-Demand Revalidation 웹훅 연동으로 해결했다. 백엔드 admin에서 매장 데이터를 변경하면 `POST /api/revalidate { tag: "agency" }` 웹훅이 호출되어, 해당 태그의 Data Cache가 즉시 무효화된다. 다음 유저 요청 시 백엔드에서 새 데이터를 가져와 Data Cache를 재생성한다.
+
+이 경험을 통해 **설계 기준 표에서 `force-dynamic`만으로는 "매 요청 최신 데이터"를 보장할 수 없다**는 점을 반영했다. 매 요청 최신이 필요한 경우 fetch 옵션에 `cache: 'no-store'`를 명시하거나, On-Demand Revalidation으로 Data Cache를 관리해야 한다.
+
+---
+
+## 트러블슈팅 2: Next.js 미들웨어 쿠키 오염 문제
 
 마이페이지를 서버 컴포넌트로 전환하면서 예상치 못한 버그를 발견했다.
 
